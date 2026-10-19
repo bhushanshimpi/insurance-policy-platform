@@ -1,0 +1,14 @@
+node_modules/
+coverage/
+tmp/
+uploads/
+*.log
+.env
+.env.local
+data/
+*.xlsx
+*.csv
+!tests/fixtures/**
+dist/
+.DS_Store
+Thumbs.db

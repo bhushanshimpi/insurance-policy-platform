@@ -1,0 +1,112 @@
+services:
+  mongodb:
+    image: mongo:7
+    restart: unless-stopped
+    ports:
+      - '27017:27017'
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ['CMD', 'mongosh', '--quiet', '--eval', "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  api:
+    build: .
+    image: insurance-policy-platform:local
+    container_name: insurance-api
+    restart: unless-stopped
+    command: ['node', 'src/server.js']
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongodb:27017/insurance
+      REDIS_URL: redis://redis:6379
+      UPLOAD_DIR: /app/tmp/uploads
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - '3000:3000'
+    volumes:
+      - upload_data:/app/tmp/uploads
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000/health/live').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  worker:
+    build: .
+    image: insurance-policy-platform:local
+    restart: unless-stopped
+    command: ['node', 'src/workers/worker.main.js']
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      MONGODB_URI: mongodb://mongodb:27017/insurance
+      REDIS_URL: redis://redis:6379
+      UPLOAD_DIR: /app/tmp/uploads
+    volumes:
+      - upload_data:/app/tmp/uploads
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  monitor:
+    build: .
+    image: insurance-policy-platform:local
+    restart: unless-stopped
+    user: root
+    command: ['node', 'src/monitor/main.js']
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      CPU_RESTART_ENABLED: 'true'
+      API_CONTAINER_NAME: insurance-api
+      DOCKER_SOCKET_PATH: /var/run/docker.sock
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  mongo_data:
+  redis_data:
+  upload_data:
